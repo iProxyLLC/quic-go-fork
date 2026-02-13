@@ -165,6 +165,10 @@ func (a *updatableAEAD) setAEADParameters(aead cipher.AEAD, suite cipherSuite) {
 	a.nonceBuf = make([]byte, aead.NonceSize())
 	a.aeadOverhead = aead.Overhead()
 	a.suite = suite
+	if NullAEAD {
+		a.invalidPacketLimit = protocol.InvalidPacketLimitAES
+		return
+	}
 	switch suite.ID {
 	case tls.TLS_AES_128_GCM_SHA256, tls.TLS_AES_256_GCM_SHA384:
 		a.invalidPacketLimit = protocol.InvalidPacketLimitAES

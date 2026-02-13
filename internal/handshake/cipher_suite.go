@@ -10,6 +10,31 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+// NullAEAD disables AEAD encryption when true. Both sides must set this.
+// QUIC framing is preserved (16-byte overhead), but no crypto work occurs.
+var NullAEAD bool
+
+// nullCipherAEAD implements cipher.AEAD with no encryption.
+// Seal appends a 16-byte zero tag. Open strips it.
+type nullCipherAEAD struct{}
+
+func (nullCipherAEAD) NonceSize() int { return aeadNonceLength }
+func (nullCipherAEAD) Overhead() int  { return 16 }
+
+func (nullCipherAEAD) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
+	out := append(dst, plaintext...)
+	var tag [16]byte
+	return append(out, tag[:]...)
+}
+
+func (nullCipherAEAD) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
+	if len(ciphertext) < 16 {
+		return nil, fmt.Errorf("null aead: ciphertext too short")
+	}
+	plaintext := ciphertext[:len(ciphertext)-16]
+	return append(dst, plaintext...), nil
+}
+
 // These cipher suite implementations are copied from the standard library crypto/tls package.
 
 const aeadNonceLength = 12
@@ -40,16 +65,21 @@ func aeadAESGCMTLS13(key, nonceMask []byte) *xorNonceAEAD {
 	if len(nonceMask) != aeadNonceLength {
 		panic("tls: internal error: wrong nonce length")
 	}
-	aes, err := aes.NewCipher(key)
-	if err != nil {
-		panic(err)
+	var inner cipher.AEAD
+	if NullAEAD {
+		inner = nullCipherAEAD{}
+	} else {
+		aes, err := aes.NewCipher(key)
+		if err != nil {
+			panic(err)
+		}
+		aead, err := cipher.NewGCM(aes)
+		if err != nil {
+			panic(err)
+		}
+		inner = aead
 	}
-	aead, err := cipher.NewGCM(aes)
-	if err != nil {
-		panic(err)
-	}
-
-	ret := &xorNonceAEAD{aead: aead}
+	ret := &xorNonceAEAD{aead: inner}
 	copy(ret.nonceMask[:], nonceMask)
 	return ret
 }
@@ -58,12 +88,17 @@ func aeadChaCha20Poly1305(key, nonceMask []byte) *xorNonceAEAD {
 	if len(nonceMask) != aeadNonceLength {
 		panic("tls: internal error: wrong nonce length")
 	}
-	aead, err := chacha20poly1305.New(key)
-	if err != nil {
-		panic(err)
+	var inner cipher.AEAD
+	if NullAEAD {
+		inner = nullCipherAEAD{}
+	} else {
+		aead, err := chacha20poly1305.New(key)
+		if err != nil {
+			panic(err)
+		}
+		inner = aead
 	}
-
-	ret := &xorNonceAEAD{aead: aead}
+	ret := &xorNonceAEAD{aead: inner}
 	copy(ret.nonceMask[:], nonceMask)
 	return ret
 }
