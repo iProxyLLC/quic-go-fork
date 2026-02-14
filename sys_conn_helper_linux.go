@@ -21,7 +21,7 @@ const (
 
 const ecnIPv4DataLen = 1
 
-const batchSize = 64 // needs to smaller than MaxUint8 (otherwise the type of oobConn.readPos has to be changed)
+const batchSize = 64 // needs to be smaller than MaxUint8 (otherwise the type of oobConn.readPos has to be changed)
 
 var kernelVersionMajor int
 
