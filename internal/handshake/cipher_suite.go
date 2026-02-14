@@ -22,6 +22,14 @@ func (nullCipherAEAD) NonceSize() int { return aeadNonceLength }
 func (nullCipherAEAD) Overhead() int  { return 16 }
 
 func (nullCipherAEAD) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
+	// Fast path: in-place sealing (dst and plaintext share backing array).
+	// quic-go calls Seal(payload[:0], nonce, payload, ad) — dst starts at
+	// the same offset as plaintext with len=0 but sufficient capacity.
+	if len(dst) == 0 && cap(dst) >= len(plaintext)+16 {
+		out := dst[:len(plaintext)]
+		// Append 16-byte zero tag (no-op encryption)
+		return append(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	}
 	out := append(dst, plaintext...)
 	var tag [16]byte
 	return append(out, tag[:]...)
@@ -31,8 +39,15 @@ func (nullCipherAEAD) Open(dst, nonce, ciphertext, additionalData []byte) ([]byt
 	if len(ciphertext) < 16 {
 		return nil, fmt.Errorf("null aead: ciphertext too short")
 	}
-	plaintext := ciphertext[:len(ciphertext)-16]
-	return append(dst, plaintext...), nil
+	plainLen := len(ciphertext) - 16
+	// Fast path: in-place decryption (dst and ciphertext share backing array).
+	// quic-go calls Open(data[hdrLen:hdrLen], nonce, data[hdrLen:], ad) —
+	// dst starts at the same offset as ciphertext with len=0 but sufficient capacity.
+	// The plaintext is already at dst[:plainLen], just return the right slice.
+	if len(dst) == 0 && cap(dst) >= plainLen {
+		return dst[:plainLen], nil
+	}
+	return append(dst, ciphertext[:plainLen]...), nil
 }
 
 // These cipher suite implementations are copied from the standard library crypto/tls package.
