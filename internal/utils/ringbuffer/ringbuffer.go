@@ -86,6 +86,17 @@ func (r *RingBuffer[T]) grow() {
 	r.headPos, r.tailPos, r.full = 0, len(oldRing), false
 }
 
+// PopN pops up to n elements into dst, returning the count actually popped.
+// dst must have len >= n.
+func (r *RingBuffer[T]) PopN(dst []T, n int) int {
+	count := 0
+	for count < n && !r.Empty() {
+		dst[count] = r.PopFront()
+		count++
+	}
+	return count
+}
+
 // Clear removes all elements.
 func (r *RingBuffer[T]) Clear() {
 	var zeroValue T

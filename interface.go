@@ -174,6 +174,11 @@ type Config struct {
 	Allow0RTT bool
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
+	// OnDatagram, if set, is called synchronously for each received DATAGRAM frame,
+	// bypassing the datagram queue entirely. The callback runs inline in the
+	// connection's packet processing goroutine — it must not block.
+	// The data slice is valid only for the duration of the callback.
+	OnDatagram func([]byte)
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-07.
 	EnableStreamResetPartialDelivery bool

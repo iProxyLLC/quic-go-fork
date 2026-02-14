@@ -1003,21 +1003,20 @@ func (c *Conn) handleHandshakeConfirmed(now monotime.Time) error {
 const maxPacketsToProcess = 32
 
 func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
-	// Process packets from the receivedPackets queue.
-	// Limit the number of packets to process to maxPacketsToProcess,
-	// so we eventually get a chance to send out an ACK when receiving a lot of packets.
+	// Batch pop: lock once, drain up to maxPacketsToProcess, unlock, then process all.
+	// This reduces mutex lock/unlock from 2×N to 2 per batch.
+	var batch [maxPacketsToProcess]receivedPacket
 	c.receivedPacketMx.Lock()
+	n := c.receivedPackets.PopN(batch[:], maxPacketsToProcess)
+	hasMorePackets := !c.receivedPackets.Empty()
+	c.receivedPacketMx.Unlock()
 
-	if c.receivedPackets.Empty() {
-		c.receivedPacketMx.Unlock()
+	if n == 0 {
 		return false, nil
 	}
 
-	var hasMorePackets bool
-	for range maxPacketsToProcess {
-		p := c.receivedPackets.PopFront()
-		c.receivedPacketMx.Unlock()
-
+	for i := 0; i < n; i++ {
+		p := batch[i]
 		var datagramID qlog.DatagramID
 		if c.qlogger != nil && wire.IsLongHeaderPacket(p.data[0]) {
 			datagramID = qlog.CalculateDatagramID(p.data)
@@ -1029,18 +1028,20 @@ func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
 		if processed {
 			wasProcessed = true
 		}
-		c.receivedPacketMx.Lock()
-		hasMorePackets = !c.receivedPackets.Empty()
-		if !hasMorePackets {
-			break
-		}
-		// Prioritize sending of new CRYPTO data.
-		// This is especially relevant when processing 0-RTT packets.
+		// Prioritize sending of new CRYPTO data during handshake.
 		if !c.handshakeComplete && (c.initialStream.HasData() || c.handshakeStream.HasData()) {
+			// Re-enqueue remaining packets
+			if i+1 < n {
+				c.receivedPacketMx.Lock()
+				for j := i + 1; j < n; j++ {
+					c.receivedPackets.PushBack(batch[j])
+				}
+				c.receivedPacketMx.Unlock()
+				hasMorePackets = true
+			}
 			break
 		}
 	}
-	c.receivedPacketMx.Unlock()
 
 	if hasMorePackets {
 		select {
@@ -2145,8 +2146,20 @@ func (c *Conn) handleDatagramFrame(f *wire.DatagramFrame) error {
 			ErrorMessage: "DATAGRAM frame too large",
 		}
 	}
+	if c.config.OnDatagram != nil {
+		c.config.OnDatagram(f.Data) // zero-copy, inline in connection.run()
+		return nil
+	}
 	c.datagramQueue.HandleDatagramFrame(f)
 	return nil
+}
+
+// SetOnDatagram sets a callback for received DATAGRAM frames, bypassing the
+// datagram queue. The callback runs inline in the connection's packet
+// processing goroutine and must not block. The data slice is only valid for
+// the duration of the callback.
+func (c *Conn) SetOnDatagram(fn func([]byte)) {
+	c.config.OnDatagram = fn
 }
 
 func (c *Conn) setCloseError(e *closeError) {
