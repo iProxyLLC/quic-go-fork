@@ -118,6 +118,17 @@ func isPermissionError(err error) bool {
 	return false
 }
 
+// isNoBufferSpaceErr returns true if the error is ENOBUFS (no buffer space available).
+// This is a transient error — the kernel ran out of send buffers temporarily.
+// Dropping the packet and continuing is safe; the buffer pressure will resolve.
+func isNoBufferSpaceErr(err error) bool {
+	var serr *os.SyscallError
+	if errors.As(err, &serr) {
+		return serr.Err == unix.ENOBUFS
+	}
+	return false
+}
+
 func isECNEnabled() bool {
 	return kernelVersionMajor >= 5 && !isECNDisabledUsingEnv()
 }
