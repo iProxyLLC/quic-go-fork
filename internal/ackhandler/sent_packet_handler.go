@@ -182,9 +182,13 @@ func (h *sentPacketHandler) ReduceBytesInFlight(size protocol.ByteCount) {
 func (h *sentPacketHandler) removeFromBytesInFlight(p *packet) {
 	if p.includedInBytesInFlight {
 		if p.Length > h.bytesInFlight {
-			panic("negative bytes_in_flight")
+			// Clamp to zero instead of panicking. This can happen when
+			// ReduceBytesInFlight (ENOBUFS correction) decrements the global
+			// counter before loss detection processes the individual packet.
+			h.bytesInFlight = 0
+		} else {
+			h.bytesInFlight -= p.Length
 		}
-		h.bytesInFlight -= p.Length
 		p.includedInBytesInFlight = false
 	}
 }
