@@ -136,8 +136,9 @@ type Conn struct {
 	version     protocol.Version
 	config      *Config
 
-	conn      sendConn
-	sendQueue sender
+	conn        sendConn
+	sendQueue   sender
+	sendErrorCh chan protocol.ByteCount // for ENOBUFS bytesInFlight correction
 
 	// lazily initialzed: most connections never migrate
 	pathManager         *pathManager
@@ -515,7 +516,14 @@ func (c *Conn) preSetup() {
 	c.largestRcvdAppData = protocol.InvalidPacketNumber
 	c.initialStream = newInitialCryptoStream(c.perspective == protocol.PerspectiveClient)
 	c.handshakeStream = newCryptoStream()
+	c.sendErrorCh = make(chan protocol.ByteCount, 16)
 	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue.SetOnSendError(func(size protocol.ByteCount) {
+		select {
+		case c.sendErrorCh <- size:
+		default: // don't block send_queue
+		}
+	})
 	c.retransmissionQueue = newRetransmissionQueue()
 	c.frameParser = *wire.NewFrameParser(
 		c.config.EnableDatagrams,
@@ -662,6 +670,9 @@ runLoop:
 			case <-c.timer.C:
 			case <-c.sendingScheduled:
 			case <-sendQueueAvailable:
+			case size := <-c.sendErrorCh:
+				c.sentPacketHandler.ReduceBytesInFlight(size)
+				c.scheduleSending()
 			case <-c.notifyReceivedPacket:
 				wasProcessed, err := c.handlePackets()
 				if err != nil {
@@ -924,6 +935,12 @@ func (c *Conn) switchToNewPath(tr *Transport, now monotime.Time) {
 	c.conn = newSendConn(tr.conn, c.conn.RemoteAddr(), packetInfo{}, utils.DefaultLogger) // TODO: find a better way
 	c.sendQueue.Close()
 	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue.SetOnSendError(func(size protocol.ByteCount) {
+		select {
+		case c.sendErrorCh <- size:
+		default:
+		}
+	})
 	go func() {
 		if err := c.sendQueue.Run(); err != nil {
 			c.destroyImpl(err)

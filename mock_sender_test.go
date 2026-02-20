@@ -225,6 +225,42 @@ func (c *MockSenderSendProbeCall) DoAndReturn(f func(*packetBuffer, net.Addr)) *
 	return c
 }
 
+// SetOnSendError mocks base method.
+func (m *MockSender) SetOnSendError(f func(protocol.ByteCount)) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetOnSendError", f)
+}
+
+// SetOnSendError indicates an expected call of SetOnSendError.
+func (mr *MockSenderMockRecorder) SetOnSendError(f any) *MockSenderSetOnSendErrorCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetOnSendError", reflect.TypeOf((*MockSender)(nil).SetOnSendError), f)
+	return &MockSenderSetOnSendErrorCall{Call: call}
+}
+
+// MockSenderSetOnSendErrorCall wrap *gomock.Call
+type MockSenderSetOnSendErrorCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSenderSetOnSendErrorCall) Return() *MockSenderSetOnSendErrorCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSenderSetOnSendErrorCall) Do(f func(func(protocol.ByteCount))) *MockSenderSetOnSendErrorCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSenderSetOnSendErrorCall) DoAndReturn(f func(func(protocol.ByteCount))) *MockSenderSetOnSendErrorCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // WouldBlock mocks base method.
 func (m *MockSender) WouldBlock() bool {
 	m.ctrl.T.Helper()

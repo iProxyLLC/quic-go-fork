@@ -240,6 +240,18 @@ func (b *BBRv1Sender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 	}
 }
 
+// ResetForStall forces BBR back to STARTUP phase to re-probe bandwidth
+// from scratch. Called when no ACKs arrive for an extended period, indicating
+// the path has been disrupted and recovered, but BBR is stuck with stale estimates.
+func (b *BBRv1Sender) ResetForStall() {
+	b.state = STARTUP
+	b.pacing_gain = 2.89
+	b.cwnd_gain = 2.89
+	b.inRecovery = false
+	b.delivered = 0
+	clear(b.latelybandwidth[:])
+}
+
 func (b *BBRv1Sender) SetMaxDatagramSize(maxDatagramSize protocol.ByteCount) {
 	b.maxDatagramSize = maxDatagramSize
 }

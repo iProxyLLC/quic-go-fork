@@ -13,6 +13,7 @@ type sender interface {
 	WouldBlock() bool
 	Available() <-chan struct{}
 	Close()
+	SetOnSendError(func(protocol.ByteCount))
 }
 
 type queueEntry struct {
@@ -27,6 +28,7 @@ type sendQueue struct {
 	runStopped  chan struct{} // runStopped when the run loop returns
 	available   chan struct{}
 	conn        sendConn
+	onSendError func(protocol.ByteCount) // called when ENOBUFS drops a packet
 }
 
 var _ sender = &sendQueue{}
@@ -88,11 +90,14 @@ func (h *sendQueue) Run() error {
 			shouldClose = true
 		case e := <-h.queue:
 			if err := h.conn.Write(e.buf.Data, e.gsoSize, e.ecn); err != nil {
-				// This additional check enables:
-				// 1. Checking for "datagram too large" message from the kernel, as such,
-				// 2. Path MTU discovery,and
-				// 3. Eventual detection of loss PingFrame.
-				if !isSendMsgSizeErr(err) && !isNoBufferSpaceErr(err) {
+				if isNoBufferSpaceErr(err) {
+					// Packet was never sent — notify congestion controller
+					// so bytesInFlight can be corrected.
+					if h.onSendError != nil {
+						h.onSendError(protocol.ByteCount(len(e.buf.Data)))
+					}
+				} else if !isSendMsgSizeErr(err) {
+					e.buf.Release()
 					return err
 				}
 			}
@@ -103,6 +108,10 @@ func (h *sendQueue) Run() error {
 			}
 		}
 	}
+}
+
+func (h *sendQueue) SetOnSendError(f func(protocol.ByteCount)) {
+	h.onSendError = f
 }
 
 func (h *sendQueue) Close() {

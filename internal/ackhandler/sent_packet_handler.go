@@ -106,6 +106,8 @@ type sentPacketHandler struct {
 	enableECN  bool
 	ecnTracker ecnHandler
 
+	lastAckRecvTime monotime.Time // time of last ACK received (for stall detection)
+
 	perspective protocol.Perspective
 
 	qlogger     qlogwriter.Recorder
@@ -167,6 +169,14 @@ func NewSentPacketHandler(
 		h.ecnTracker = newECNTracker(logger, qlogger)
 	}
 	return h
+}
+
+func (h *sentPacketHandler) ReduceBytesInFlight(size protocol.ByteCount) {
+	if size > h.bytesInFlight {
+		h.bytesInFlight = 0
+	} else {
+		h.bytesInFlight -= size
+	}
 }
 
 func (h *sentPacketHandler) removeFromBytesInFlight(p *packet) {
@@ -385,6 +395,7 @@ func (h *sentPacketHandler) getPacketNumberSpace(encLevel protocol.EncryptionLev
 }
 
 func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.EncryptionLevel, rcvTime monotime.Time) (bool /* contained 1-RTT packet */, error) {
+	h.lastAckRecvTime = rcvTime
 	pnSpace := h.getPacketNumberSpace(encLevel)
 
 	largestAcked := ack.LargestAcked()
@@ -873,8 +884,27 @@ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protoc
 	}
 }
 
+// checkSendStall detects when no ACKs have been received for an extended
+// period despite having packets in flight. This catches permanent BBR
+// freeze states where the congestion window is too small to recover.
+func (h *sentPacketHandler) checkSendStall(now monotime.Time) {
+	if h.bytesInFlight == 0 || h.lastAckRecvTime.IsZero() {
+		return
+	}
+	stallThreshold := max(10*time.Second, 5*h.rttStats.SmoothedRTT())
+	if time.Duration(now-h.lastAckRecvTime) > stallThreshold {
+		if h.logger.Debug() {
+			h.logger.Debugf("Send stall detected: no ACK for %s (threshold %s), resetting bytesInFlight and congestion state",
+				time.Duration(now-h.lastAckRecvTime), stallThreshold)
+		}
+		h.bytesInFlight = 0
+		h.Congestion.ResetForStall()
+	}
+}
+
 func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 	defer h.setLossDetectionTimer(now)
+	h.checkSendStall(now)
 
 	if h.handshakeConfirmed {
 		h.detectLostPathProbes(now)

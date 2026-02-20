@@ -16,6 +16,7 @@ type SendAlgorithm interface {
 	OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount)
 	OnRetransmissionTimeout(packetsRetransmitted bool)
 	SetMaxDatagramSize(protocol.ByteCount)
+	ResetForStall() // force restart bandwidth probing after prolonged send stall
 }
 
 // A SendAlgorithmWithDebugInfos is a SendAlgorithm that exposes some debug infos

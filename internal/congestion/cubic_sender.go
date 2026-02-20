@@ -296,6 +296,11 @@ func (c *CubicSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 	c.congestionWindow = c.minCongestionWindow()
 }
 
+// ResetForStall resets congestion state after a prolonged send stall.
+func (c *CubicSender) ResetForStall() {
+	c.hybridSlowStart.Restart()
+}
+
 // OnConnectionMigration is called when the connection is migrated (?)
 func (c *CubicSender) OnConnectionMigration() {
 	c.hybridSlowStart.Restart()

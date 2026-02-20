@@ -238,6 +238,7 @@ type SendAlgorithm interface {
 	OnCongestionEvent(number protocol.PacketNumber, lostBytes ByteCount, priorInFlight ByteCount)
 	OnRetransmissionTimeout(packetsRetransmitted bool)
 	SetMaxDatagramSize(ByteCount)
+	ResetForStall()
 
 	SetMinRTT(func() time.Duration)
 }

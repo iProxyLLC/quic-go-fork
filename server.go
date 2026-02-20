@@ -758,11 +758,11 @@ func (s *baseServer) handleInitialImpl(p receivedPacket, hdr *wire.Header) error
 		rtt = token.RTT
 	}
 
-	config := s.config
 	clientInfo := &ClientInfo{
 		RemoteAddr:   p.remoteAddr,
 		AddrVerified: clientAddrVerified,
 	}
+	var config *Config
 	if s.config.GetConfigForClient != nil {
 		conf, err := s.config.GetConfigForClient(clientInfo)
 		if err != nil {
@@ -771,6 +771,10 @@ func (s *baseServer) handleInitialImpl(p receivedPacket, hdr *wire.Header) error
 			return nil
 		}
 		config = populateConfig(conf)
+	} else {
+		// Each connection needs its own Config copy so that per-connection
+		// callbacks (e.g. OnDatagram) don't overwrite each other.
+		config = populateConfig(s.config)
 	}
 
 	var conn *wrappedConn

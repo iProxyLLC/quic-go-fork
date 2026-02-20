@@ -2,12 +2,19 @@ package quic
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/utils/ringbuffer"
 	"github.com/quic-go/quic-go/internal/wire"
 )
+
+// ErrDatagramSendTimeout is returned when a datagram cannot be queued
+// within the send timeout. Per RFC 9221, QUIC datagrams are unreliable
+// and should be dropped rather than blocking the sender indefinitely.
+var ErrDatagramSendTimeout = errors.New("datagram send timeout: queue full")
 
 const (
 	maxDatagramSendQueueLen = 32
@@ -45,7 +52,9 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 
 // Add queues a new DATAGRAM frame for sending.
 // Up to 32 DATAGRAM frames will be queued.
-// Once that limit is reached, Add blocks until the queue size has reduced.
+// If the queue is full, Add waits up to 500ms for space. If no space opens
+// (e.g., congestion control blocks packet packing), returns ErrDatagramSendTimeout.
+// QUIC datagrams are unreliable (RFC 9221) — blocking forever is incorrect.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
 
@@ -65,6 +74,8 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 		case <-h.closed:
 			return h.closeErr
 		case <-h.sent:
+		case <-time.After(500 * time.Millisecond):
+			return ErrDatagramSendTimeout
 		}
 		h.sendMx.Lock()
 	}

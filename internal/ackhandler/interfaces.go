@@ -35,5 +35,9 @@ type SentPacketHandler interface {
 	GetLossDetectionTimeout() monotime.Time
 	OnLossDetectionTimeout(now monotime.Time) error
 
+	// ReduceBytesInFlight is called when a packet was counted as sent but
+	// never actually transmitted (e.g. ENOBUFS in send_queue).
+	ReduceBytesInFlight(size protocol.ByteCount)
+
 	MigratedPath(now monotime.Time, initialMaxPacketSize protocol.ByteCount)
 }
