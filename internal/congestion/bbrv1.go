@@ -36,8 +36,10 @@ type BBRv1Sender struct {
 	delivered       protocol.ByteCount
 	delivered_time  monotime.Time
 	nextSendTime    monotime.Time
-	maxDatagramSize protocol.ByteCount
-	inRecovery      bool
+	maxDatagramSize  protocol.ByteCount
+	inRecovery       bool
+	roundLostBytes   protocol.ByteCount // accumulated lost bytes this round
+	roundMaxInflight protocol.ByteCount // max priorInFlight seen during this round
 }
 
 const (
@@ -191,6 +193,18 @@ func (b *BBRv1Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 		b.delivered = 0
 		b.delivered_time = eventTime
 		b.update_bandwidth_filter()
+		// Evaluate accumulated loss for this round
+		if b.roundLostBytes > 0 && b.roundMaxInflight > 0 {
+			lossRate := float64(b.roundLostBytes) / float64(b.roundMaxInflight)
+			if lossRate >= 0.10 && !b.inRecovery && b.state != STARTUP {
+				b.inRecovery = true
+				if b.state == PROBE_BW {
+					b.pacing_gain = 1.0
+				}
+			}
+		}
+		b.roundLostBytes = 0
+		b.roundMaxInflight = 0
 		if b.state == STARTUP && b.maxBandwidth > b.st_last_bw && ((float64(b.maxBandwidth)-float64(b.st_last_bw))/float64(b.st_last_bw) >= 0.25) {
 			b.st_last_bw = b.maxBandwidth
 			b.st_start_round = b.round
@@ -218,12 +232,18 @@ func (b *BBRv1Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 func (b *BBRv1Sender) MaybeExitSlowStart() {}
 
 func (b *BBRv1Sender) OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount) {
-	// TODO: handle this
-	// if b.state == STARTUP || b.state == PROBE_RTT {
-	// 	return
-	// }
-	// b.inRecovery = true
-	// b.pacing_gain = 1
+	if b.inRecovery || b.state == STARTUP {
+		return
+	}
+	// Guard: ECN path (sent_packet_handler.go:452) calls with lostBytes=0.
+	// Don't let zero-loss events pollute round accounting.
+	if lostBytes == 0 {
+		return
+	}
+	b.roundLostBytes += lostBytes
+	if priorInFlight > b.roundMaxInflight {
+		b.roundMaxInflight = priorInFlight
+	}
 }
 
 // OnRetransmissionTimeout is called when a retransmission timer expires.
