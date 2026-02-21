@@ -232,7 +232,7 @@ func (b *BBRv1Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 func (b *BBRv1Sender) MaybeExitSlowStart() {}
 
 func (b *BBRv1Sender) OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount) {
-	if b.inRecovery || b.state == STARTUP {
+	if b.inRecovery || b.state == STARTUP || b.state == PROBE_RTT {
 		return
 	}
 	// Guard: ECN path (sent_packet_handler.go:452) calls with lostBytes=0.

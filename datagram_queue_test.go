@@ -30,7 +30,7 @@ func TestDatagramQueueSendQueueLength(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		queue := newDatagramQueue(func() {}, utils.DefaultLogger, 0, 0)
 
-		for range maxDatagramSendQueueLen {
+		for range defaultDatagramSendQueueLen {
 			require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte{0}}))
 		}
 		errChan := make(chan error, 1)
@@ -63,7 +63,7 @@ func TestDatagramQueueSendQueueLength(t *testing.T) {
 			t.Fatal("timeout")
 		}
 		// pop all the remaining datagrams
-		for range maxDatagramSendQueueLen - 1 {
+		for range defaultDatagramSendQueueLen - 1 {
 			queue.Pop()
 		}
 		f := queue.Peek()
@@ -149,7 +149,7 @@ func TestDatagramQueueClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		queue := newDatagramQueue(func() {}, utils.DefaultLogger, 0, 0)
 
-		for range maxDatagramSendQueueLen {
+		for range defaultDatagramSendQueueLen {
 			require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte{0}}))
 		}
 		errChan1 := make(chan error, 1)

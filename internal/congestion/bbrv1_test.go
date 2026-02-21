@@ -210,6 +210,44 @@ func TestOnCongestionEventZeroLossIgnored(t *testing.T) {
 	}
 }
 
+func TestOnCongestionEventSkipsProbeRTT(t *testing.T) {
+	b := newTestBBR()
+	warmupBBR(b, 100_000)
+
+	if b.state != PROBE_BW {
+		t.Skipf("BBR not in PROBE_BW after warmup (state=%d)", b.state)
+	}
+
+	// Force into PROBE_RTT (simulates the 10s min-RTT timer firing)
+	b.state = PROBE_RTT
+	b.pacing_gain = 1
+	b.cwnd_gain = 1
+	b.probeRTTStart = monotime.Now()
+
+	// Simulate heavy loss during PROBE_RTT — expected because cwnd=4*MSS
+	for i := 0; i < 20; i++ {
+		b.OnCongestionEvent(protocol.PacketNumber(50+i), 1350, 100_000)
+	}
+
+	// Losses during PROBE_RTT should NOT accumulate
+	if b.roundLostBytes != 0 {
+		t.Errorf("PROBE_RTT losses should be ignored, but roundLostBytes=%d", b.roundLostBytes)
+	}
+
+	// Exit PROBE_RTT → PROBE_BW
+	b.entry_PROBE_BW()
+
+	// Trigger a round boundary — should NOT enter recovery from PROBE_RTT losses
+	now := monotime.Now() + monotime.Time(20*time.Second)
+	b.OnPacketSent(now, 100_000, 200, 1350, true)
+	now += monotime.Time(80 * time.Millisecond)
+	b.OnPacketAcked(200, 1350, 100_000, now)
+
+	if b.inRecovery {
+		t.Error("should NOT enter recovery from losses during PROBE_RTT (they are expected due to 4*MSS cwnd)")
+	}
+}
+
 func TestRTOResetHalvesBandwidth(t *testing.T) {
 	b := newTestBBR()
 	warmupBBR(b, 100_000)
