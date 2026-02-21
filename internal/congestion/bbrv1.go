@@ -204,8 +204,7 @@ func (b *BBRv1Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 	if b.state == DRAIN && priorInFlight < protocol.ByteCount(b.bdp()) {
 		b.entry_PROBE_BW()
 	}
-	app_limited := priorInFlight < protocol.ByteCount(b.bdp())
-	if (delivery_rate > b.maxBandwidth || (!app_limited && delivery_rate > 0)) && b.state != DRAIN && !b.inRecovery {
+	if delivery_rate > b.maxBandwidth && b.state != DRAIN && !b.inRecovery {
 		b.maxBandwidth = delivery_rate
 	}
 	if eventTime-b.lastNewMinRTTTime >= monotime.Time((10*time.Second)) && eventTime-b.probeRTTStart >= monotime.Time((10*time.Second)) {
