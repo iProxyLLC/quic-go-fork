@@ -651,19 +651,37 @@ func (p *packetPacker) composeNextPacket(
 	}
 
 	if p.datagramQueue != nil {
-		if f := p.datagramQueue.Peek(); f != nil {
+		// When retransmissions or stream data are pending, reserve space for them.
+		dgramBudget := maxPayloadSize - pl.length
+		if hasRetransmission || hasData {
+			reserved := protocol.MinStreamFrameSize
+			if dgramBudget > reserved {
+				dgramBudget -= reserved
+			} else {
+				dgramBudget = 0
+			}
+		}
+		const maxDatagramsPerPacket = 4
+		packed := 0
+		for packed < maxDatagramsPerPacket {
+			f := p.datagramQueue.Peek()
+			if f == nil {
+				break
+			}
 			size := f.Length(v)
-			if size <= maxPayloadSize-pl.length { // DATAGRAM frame fits
+			if size <= dgramBudget {
 				pl.frames = append(pl.frames, ackhandler.Frame{Frame: f})
 				pl.length += size
+				dgramBudget -= size
 				p.datagramQueue.Pop()
-			} else if pl.ack == nil {
-				// The DATAGRAM frame doesn't fit, and the packet doesn't contain an ACK.
-				// Discard this frame. There's no point in retrying this in the next packet,
-				// as it's unlikely that the available packet size will increase.
+				packed++
+				continue
+			}
+			// Frame doesn't fit. If no ACK in packet, discard (won't fit later either).
+			if pl.ack == nil {
 				p.datagramQueue.Pop()
 			}
-			// If the DATAGRAM frame was too large and the packet contained an ACK, we'll try to send it out later.
+			break
 		}
 	}
 
