@@ -44,7 +44,7 @@ func newTestPacketPacker(t *testing.T, mockCtrl *gomock.Controller, pers protoco
 	framer := NewMockFrameSource(mockCtrl)
 	ackFramer := NewMockAckFrameSource(mockCtrl)
 	sealingManager := NewMockSealingManager(mockCtrl)
-	datagramQueue := newDatagramQueue(func() {}, utils.DefaultLogger)
+	datagramQueue := newDatagramQueue(func() {}, utils.DefaultLogger, 0, 0)
 	retransmissionQueue := newRetransmissionQueue()
 	return &testPacketPacker{
 		pnManager:           pnManager,

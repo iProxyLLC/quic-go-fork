@@ -17,8 +17,8 @@ import (
 var ErrDatagramSendTimeout = errors.New("datagram send timeout: queue full")
 
 const (
-	maxDatagramSendQueueLen = 32
-	maxDatagramRcvQueueLen  = 128
+	defaultDatagramSendQueueLen = 64
+	defaultDatagramRcvQueueLen  = 256
 )
 
 type datagramQueue struct {
@@ -30,6 +30,9 @@ type datagramQueue struct {
 	rcvQueue ringbuffer.RingBuffer[[]byte]
 	rcvd     chan struct{} // used to notify Receive that a new datagram was received
 
+	maxSendLen int
+	maxRcvLen  int
+
 	closeErr error
 	closed   chan struct{}
 
@@ -38,15 +41,23 @@ type datagramQueue struct {
 	logger utils.Logger
 }
 
-func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
-	q := &datagramQueue{
-		hasData: hasData,
-		rcvd:    make(chan struct{}, 1),
-		sent:    make(chan struct{}, 1),
-		closed:  make(chan struct{}),
-		logger:  logger,
+func newDatagramQueue(hasData func(), logger utils.Logger, sendLen, rcvLen int) *datagramQueue {
+	if sendLen <= 0 {
+		sendLen = defaultDatagramSendQueueLen
 	}
-	q.rcvQueue.Init(maxDatagramRcvQueueLen)
+	if rcvLen <= 0 {
+		rcvLen = defaultDatagramRcvQueueLen
+	}
+	q := &datagramQueue{
+		maxSendLen: sendLen,
+		maxRcvLen:  rcvLen,
+		hasData:    hasData,
+		rcvd:       make(chan struct{}, 1),
+		sent:       make(chan struct{}, 1),
+		closed:     make(chan struct{}),
+		logger:     logger,
+	}
+	q.rcvQueue.Init(rcvLen)
 	return q
 }
 
@@ -59,7 +70,7 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
 
 	for {
-		if h.sendQueue.Len() < maxDatagramSendQueueLen {
+		if h.sendQueue.Len() < h.maxSendLen {
 			h.sendQueue.PushBack(f)
 			h.sendMx.Unlock()
 			h.hasData()
@@ -108,7 +119,7 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	copy(data, f.Data)
 	var queued bool
 	h.rcvMx.Lock()
-	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
+	if h.rcvQueue.Len() < h.maxRcvLen {
 		h.rcvQueue.PushBack(data)
 		queued = true
 		select {

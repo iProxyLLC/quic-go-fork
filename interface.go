@@ -182,6 +182,10 @@ type Config struct {
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-07.
 	EnableStreamResetPartialDelivery bool
+	// Queue capacity tuning
+	SendQueueSize     int // send queue capacity (default 16)
+	DatagramSendQueue int // datagram send queue length (default 64)
+	DatagramRecvQueue int // datagram recv queue length (default 256)
 	// Set custom congestion control algorithm
 	Congestion func() SendAlgorithmWithDebugInfos
 

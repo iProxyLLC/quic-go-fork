@@ -33,15 +33,18 @@ type sendQueue struct {
 
 var _ sender = &sendQueue{}
 
-const sendQueueCapacity = 8
+const defaultSendQueueCapacity = 16
 
-func newSendQueue(conn sendConn) sender {
+func newSendQueue(conn sendConn, capacity int) sender {
+	if capacity <= 0 {
+		capacity = defaultSendQueueCapacity
+	}
 	return &sendQueue{
 		conn:        conn,
 		runStopped:  make(chan struct{}),
 		closeCalled: make(chan struct{}),
 		available:   make(chan struct{}, 1),
-		queue:       make(chan queueEntry, sendQueueCapacity),
+		queue:       make(chan queueEntry, capacity),
 	}
 }
 
@@ -52,7 +55,7 @@ func (h *sendQueue) Send(p *packetBuffer, gsoSize uint16, ecn protocol.ECN) {
 	select {
 	case h.queue <- queueEntry{buf: p, gsoSize: gsoSize, ecn: ecn}:
 		// clear available channel if we've reached capacity
-		if len(h.queue) == sendQueueCapacity {
+		if len(h.queue) == cap(h.queue) {
 			select {
 			case <-h.available:
 			default:
@@ -69,7 +72,7 @@ func (h *sendQueue) SendProbe(p *packetBuffer, addr net.Addr) {
 }
 
 func (h *sendQueue) WouldBlock() bool {
-	return len(h.queue) == sendQueueCapacity
+	return len(h.queue) == cap(h.queue)
 }
 
 func (h *sendQueue) Available() <-chan struct{} {

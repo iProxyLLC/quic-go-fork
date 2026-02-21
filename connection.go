@@ -517,7 +517,7 @@ func (c *Conn) preSetup() {
 	c.initialStream = newInitialCryptoStream(c.perspective == protocol.PerspectiveClient)
 	c.handshakeStream = newCryptoStream()
 	c.sendErrorCh = make(chan protocol.ByteCount, 16)
-	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue = newSendQueue(c.conn, c.config.SendQueueSize)
 	c.sendQueue.SetOnSendError(func(size protocol.ByteCount) {
 		select {
 		case c.sendErrorCh <- size:
@@ -566,7 +566,7 @@ func (c *Conn) preSetup() {
 
 	c.receivedPacketHandler = *ackhandler.NewReceivedPacketHandler(c.logger)
 
-	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.logger)
+	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.logger, c.config.DatagramSendQueue, c.config.DatagramRecvQueue)
 	c.connState.Version = c.version
 }
 
@@ -934,7 +934,7 @@ func (c *Conn) switchToNewPath(tr *Transport, now monotime.Time) {
 	c.mtuDiscoverer.Reset(now, initialPacketSize, maxPacketSize)
 	c.conn = newSendConn(tr.conn, c.conn.RemoteAddr(), packetInfo{}, utils.DefaultLogger) // TODO: find a better way
 	c.sendQueue.Close()
-	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue = newSendQueue(c.conn, c.config.SendQueueSize)
 	c.sendQueue.SetOnSendError(func(size protocol.ByteCount) {
 		select {
 		case c.sendErrorCh <- size:
