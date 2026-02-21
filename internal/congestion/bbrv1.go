@@ -249,13 +249,14 @@ func (b *BBRv1Sender) OnCongestionEvent(number protocol.PacketNumber, lostBytes 
 // OnRetransmissionTimeout is called when a retransmission timer expires.
 func (b *BBRv1Sender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 	if packetsRetransmitted {
-		b.maxBandwidth = 32 * b.maxDatagramSize
-		b.state = STARTUP
-		b.pacing_gain = 2.89
-		b.cwnd_gain = 2.89
-		b.inRecovery = false
+		floor := 32 * b.maxDatagramSize
+		b.maxBandwidth = max(b.maxBandwidth/2, floor)
 		b.delivered = 0
-		clear(b.latelybandwidth[:])
+		b.delivered_time = 0
+		b.inRecovery = true
+		if b.state == PROBE_BW {
+			b.pacing_gain = 1.0
+		}
 	}
 }
 

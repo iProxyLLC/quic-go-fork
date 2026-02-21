@@ -209,3 +209,73 @@ func TestOnCongestionEventZeroLossIgnored(t *testing.T) {
 		t.Errorf("zero-loss events should not update roundMaxInflight, got %d", b.roundMaxInflight)
 	}
 }
+
+func TestRTOResetHalvesBandwidth(t *testing.T) {
+	b := newTestBBR()
+	warmupBBR(b, 100_000)
+
+	// Set a known high bandwidth
+	highBW := protocol.ByteCount(500_000)
+	for i := range bw_win {
+		b.latelybandwidth[i] = highBW
+	}
+	b.update_bandwidth_filter()
+	prevMax := b.maxBandwidth
+	prevState := b.state
+
+	b.OnRetransmissionTimeout(true)
+
+	// Should halve, not floor
+	floor := 32 * b.maxDatagramSize
+	expected := max(prevMax/2, floor)
+	if b.maxBandwidth != expected {
+		t.Errorf("maxBandwidth after RTO: got %d, want %d (half of %d, floor %d)",
+			b.maxBandwidth, expected, prevMax, floor)
+	}
+
+	// Should NOT reset to STARTUP
+	if b.state == STARTUP && prevState != STARTUP {
+		t.Error("should stay in current state, not reset to STARTUP")
+	}
+
+	// Should enter recovery
+	if !b.inRecovery {
+		t.Error("should enter recovery after RTO")
+	}
+
+	// latelybandwidth should NOT be cleared
+	anyNonZero := false
+	for _, bw := range b.latelybandwidth {
+		if bw > 0 {
+			anyNonZero = true
+			break
+		}
+	}
+	if !anyNonZero {
+		t.Error("latelybandwidth should be preserved after soft RTO reset")
+	}
+}
+
+func TestRTOResetRespectsFloor(t *testing.T) {
+	b := newTestBBR()
+	b.maxBandwidth = 40 * b.maxDatagramSize
+
+	b.OnRetransmissionTimeout(true)
+
+	floor := 32 * b.maxDatagramSize
+	if b.maxBandwidth < floor {
+		t.Errorf("maxBandwidth %d fell below floor %d", b.maxBandwidth, floor)
+	}
+}
+
+func TestRTONoOpWhenNoRetransmit(t *testing.T) {
+	b := newTestBBR()
+	warmupBBR(b, 100_000)
+
+	prevMax := b.maxBandwidth
+	b.OnRetransmissionTimeout(false)
+
+	if b.maxBandwidth != prevMax {
+		t.Errorf("maxBandwidth changed on non-retransmit RTO: %d -> %d", prevMax, b.maxBandwidth)
+	}
+}
