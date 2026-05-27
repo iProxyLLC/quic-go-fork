@@ -17,8 +17,8 @@ import (
 var ErrDatagramSendTimeout = errors.New("datagram send timeout: queue full")
 
 const (
-	defaultDatagramSendQueueLen = 64
-	defaultDatagramRcvQueueLen  = 256
+	defaultDatagramSendQueueLen = 1024
+	defaultDatagramRcvQueueLen  = 1024
 )
 
 type datagramQueue struct {
