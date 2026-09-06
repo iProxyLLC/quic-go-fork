@@ -11,11 +11,11 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/synctest"
 	"github.com/quic-go/quic-go/qlog"
 	"github.com/quic-go/quic-go/qlogwriter"
 	"github.com/quic-go/quic-go/testutils/simnet"
@@ -30,8 +30,8 @@ func requireIdleTimeoutError(t *testing.T, err error) {
 	var idleTimeoutErr *quic.IdleTimeoutError
 	require.ErrorAs(t, err, &idleTimeoutErr)
 	require.True(t, idleTimeoutErr.Timeout())
-	var nerr net.Error
-	require.True(t, errors.As(err, &nerr))
+	nerr, ok := errors.AsType[net.Error](err)
+	require.True(t, ok)
 	require.True(t, nerr.Timeout())
 }
 
@@ -477,8 +477,8 @@ func testFaultyPacketConn(t *testing.T, pers protocol.Perspective) {
 		if pers == protocol.PerspectiveClient {
 			require.Contains(t, clientErr.Error(), io.ErrClosedPipe.Error())
 		} else {
-			var nerr net.Error
-			require.True(t, errors.As(clientErr, &nerr))
+			nerr, ok := errors.AsType[net.Error](clientErr)
+			require.True(t, ok)
 			require.True(t, nerr.Timeout())
 		}
 
@@ -488,8 +488,8 @@ func testFaultyPacketConn(t *testing.T, pers protocol.Perspective) {
 			if pers == protocol.PerspectiveServer {
 				require.Contains(t, serverErr.Error(), io.ErrClosedPipe.Error())
 			} else {
-				var nerr net.Error
-				require.True(t, errors.As(serverErr, &nerr))
+				nerr, ok := errors.AsType[net.Error](serverErr)
+				require.True(t, ok)
 				require.True(t, nerr.Timeout())
 			}
 		default: // The handshake didn't complete

@@ -86,7 +86,8 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 		}
 
 		switch fn := typ.Field(i).Name; fn {
-		case "GetConfigForClient", "RequireAddressValidation", "GetLogWriter", "AllowConnectionWindowIncrease", "Tracer":
+		case "GetConfigForClient", "RequireAddressValidation", "GetLogWriter", "AllowConnectionWindowIncrease", "Tracer",
+			"OnDatagram", "Congestion":
 			// Can't compare functions.
 		case "Versions":
 			f.Set(reflect.ValueOf([]Version{1, 2, 3}))
@@ -128,11 +129,12 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 			f.Set(reflect.ValueOf(true))
 		case "EnableStreamResetPartialDelivery":
 			f.Set(reflect.ValueOf(true))
-		case "Congestion":
-			ff := func() SendAlgorithmWithDebugInfos {
-				return nil
-			}
-			f.Set(reflect.ValueOf(ff))
+		case "SendQueueSize":
+			f.Set(reflect.ValueOf(7))
+		case "DatagramSendQueue":
+			f.Set(reflect.ValueOf(33))
+		case "DatagramRecvQueue":
+			f.Set(reflect.ValueOf(44))
 		default:
 			t.Fatalf("all fields must be accounted for, but saw unknown field %q", fn)
 		}

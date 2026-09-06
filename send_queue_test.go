@@ -2,11 +2,12 @@ package quic
 
 import (
 	"net"
+	"net/netip"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/synctest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,7 +84,7 @@ func TestSendQueueBlocking(t *testing.T) {
 		}()
 
 		// +1, since one packet will be queued in the Write call
-		for i := range sendQueueCapacity + 1 {
+		for i := range defaultSendQueueCapacity + 1 {
 			require.False(t, q.WouldBlock())
 			q.Send(getPacketWithContents([]byte("foobar")), 10, protocol.ECT1)
 			// make sure that the first packet is actually enqueued in the Write call
@@ -132,7 +133,7 @@ func TestSendQueueBlocking(t *testing.T) {
 		default:
 		}
 
-		for range sendQueueCapacity {
+		for range defaultSendQueueCapacity {
 			blockWrite <- struct{}{}
 		}
 		synctest.Wait()
@@ -175,7 +176,7 @@ func TestSendQueueWriteError(t *testing.T) {
 		sent := make(chan struct{})
 		go func() {
 			defer close(sent)
-			for range 2 * sendQueueCapacity {
+			for range 2 * defaultSendQueueCapacity {
 				q.Send(getPacketWithContents([]byte("raboof")), 6, protocol.ECNNon)
 			}
 		}()
@@ -196,6 +197,11 @@ func TestSendQueueSendProbe(t *testing.T) {
 	q := newSendQueue(c, 0)
 
 	addr := &net.UDPAddr{IP: net.IPv4(42, 42, 42, 42), Port: 42}
-	c.EXPECT().WriteTo([]byte("foobar"), addr)
-	q.SendProbe(getPacketWithContents([]byte("foobar")), addr)
+	localAddr := netip.MustParseAddr("43.43.43.43")
+	c.EXPECT().WriteTo([]byte("foobar"), addr, packetInfo{
+		addr: localAddr,
+	})
+	q.SendProbe(getPacketWithContents([]byte("foobar")), addr, packetInfo{
+		addr: localAddr,
+	})
 }

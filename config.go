@@ -104,9 +104,6 @@ func populateConfig(config *Config) *Config {
 	if initialPacketSize == 0 {
 		initialPacketSize = protocol.InitialPacketSize
 	}
-	if config.Congestion == nil {
-		config.Congestion = func() SendAlgorithmWithDebugInfos { return nil }
-	}
 
 	return &Config{
 		GetConfigForClient:               config.GetConfigForClient,
@@ -134,4 +131,15 @@ func populateConfig(config *Config) *Config {
 		DatagramRecvQueue:                config.DatagramRecvQueue,
 		Congestion:                       config.Congestion,
 	}
+}
+
+// congestionAlgorithm returns the configured congestion controller, or nil
+// so the sent packet handler creates the default (cubic). Kept out of
+// populateConfig: a synthesized func there made Config.Clone() unequal to
+// its source (funcs never compare equal), breaking TestConfigClone.
+func (c *Config) congestionAlgorithm() SendAlgorithmWithDebugInfos {
+	if c.Congestion == nil {
+		return nil
+	}
+	return c.Congestion()
 }

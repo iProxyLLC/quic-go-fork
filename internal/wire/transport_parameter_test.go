@@ -14,6 +14,8 @@ import (
 	"github.com/quic-go/quic-go/internal/qerr"
 	"github.com/quic-go/quic-go/quicvarint"
 
+	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,6 +128,30 @@ func TestMarshalAndUnmarshalTransportParameters(t *testing.T) {
 	require.Equal(t, params.EnableResetStreamAt, p.EnableResetStreamAt)
 	require.NotNil(t, p.MinAckDelay)
 	require.Equal(t, minAckDelay, *p.MinAckDelay)
+}
+
+func TestResetStreamAtTransportParameterCodepoints(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ids  []transportParameterID
+	}{
+		{name: "current", ids: []transportParameterID{resetStreamAtParameterID}},
+		{name: "legacy", ids: []transportParameterID{legacyResetStreamAtParameterID}},
+		{name: "both", ids: []transportParameterID{resetStreamAtParameterID, legacyResetStreamAtParameterID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var data []byte
+			for _, id := range tc.ids {
+				data = quicvarint.Append(data, uint64(id))
+				data = quicvarint.Append(data, 0)
+			}
+			data = appendInitialSourceConnectionID(data)
+
+			var p TransportParameters
+			require.NoError(t, p.Unmarshal(data, protocol.PerspectiveClient))
+			require.True(t, p.EnableResetStreamAt)
+		})
+	}
 }
 
 func TestMarshalAdditionalTransportParameters(t *testing.T) {
@@ -392,6 +418,17 @@ func TestTransportParameterErrors(t *testing.T) {
 			expectedErrMsg: "wrong length for reset_stream_at: 1 (expected empty)",
 		},
 		{
+			name: "invalid value for legacy reset_stream_at",
+			data: func() []byte {
+				b := quicvarint.Append(nil, uint64(legacyResetStreamAtParameterID))
+				b = quicvarint.Append(b, 1)
+				b = quicvarint.Append(b, 1)
+				return appendInitialSourceConnectionID(b)
+			}(),
+			perspective:    protocol.PerspectiveClient,
+			expectedErrMsg: "wrong length for reset_stream_at: 1 (expected empty)",
+		},
+		{
 			name: "min ack delay is greater than max ack delay",
 			data: func() []byte {
 				b := quicvarint.Append(nil, uint64(minAckDelayParameterID))
@@ -458,6 +495,20 @@ func TestTransportParameterUnknownParameters(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, protocol.ByteCount(0x1337), p.InitialMaxStreamDataBidiLocal)
 	require.Equal(t, protocol.ByteCount(0x42), p.InitialMaxStreamDataBidiRemote)
+}
+
+func TestSessionTicketTransportParameterRejectsUnknownParameter(t *testing.T) {
+	b := (&TransportParameters{
+		ActiveConnectionIDLimit: 2,
+		MaxDatagramFrameSize:    protocol.InvalidByteCount,
+	}).MarshalForSessionTicket(nil)
+	b = quicvarint.Append(b, 0x42)
+	b = quicvarint.Append(b, 6)
+	b = append(b, []byte("foobar")...)
+
+	var p TransportParameters
+	err := p.UnmarshalFromSessionTicket(b)
+	require.EqualError(t, err, "unknown transport parameter 0x42 in session ticket")
 }
 
 func TestTransportParameterRejectsDuplicateParameters(t *testing.T) {
@@ -622,6 +673,16 @@ func TestSessionTicketInvalidTransportParameters(t *testing.T) {
 	require.Error(t, p.UnmarshalFromSessionTicket([]byte("foobar")))
 }
 
+func TestSessionTicketLegacyResetStreamAtTransportParameter(t *testing.T) {
+	b := quicvarint.Append(nil, transportParameterMarshalingVersion)
+	b = quicvarint.Append(b, uint64(legacyResetStreamAtParameterID))
+	b = quicvarint.Append(b, 0)
+
+	var p TransportParameters
+	require.NoError(t, p.UnmarshalFromSessionTicket(b))
+	require.True(t, p.EnableResetStreamAt)
+}
+
 func TestSessionTicketTransportParameterVersionMismatch(t *testing.T) {
 	var p TransportParameters
 	data := p.MarshalForSessionTicket(nil)
@@ -641,6 +702,7 @@ func TestTransportParametersValidFor0RTT(t *testing.T) {
 		MaxUniStreamNum:                6,
 		ActiveConnectionIDLimit:        7,
 		MaxDatagramFrameSize:           1000,
+		EnableResetStreamAt:            true,
 	}
 
 	tests := []struct {
@@ -652,6 +714,11 @@ func TestTransportParametersValidFor0RTT(t *testing.T) {
 			name:   "No Changes",
 			modify: func(p *TransportParameters) {},
 			valid:  true,
+		},
+		{
+			name:   "ResetStreamAt disabled",
+			modify: func(p *TransportParameters) { p.EnableResetStreamAt = false },
+			valid:  false,
 		},
 		{
 			name: "InitialMaxStreamDataBidiLocal reduced",
@@ -745,6 +812,12 @@ func TestTransportParametersValidFor0RTT(t *testing.T) {
 			require.Equal(t, tt.valid, p.ValidFor0RTT(saved))
 		})
 	}
+	t.Run("ResetStreamAt enabled", func(t *testing.T) {
+		p := *saved
+		withoutResetStreamAt := *saved
+		withoutResetStreamAt.EnableResetStreamAt = false
+		require.True(t, p.ValidFor0RTT(&withoutResetStreamAt))
+	})
 }
 
 func TestTransportParametersValidAfter0RTT(t *testing.T) {
@@ -757,6 +830,7 @@ func TestTransportParametersValidAfter0RTT(t *testing.T) {
 		MaxUniStreamNum:                6,
 		ActiveConnectionIDLimit:        7,
 		MaxDatagramFrameSize:           1000,
+		EnableResetStreamAt:            true,
 	}
 
 	tests := []struct {
@@ -768,6 +842,11 @@ func TestTransportParametersValidAfter0RTT(t *testing.T) {
 			name:   "no changes",
 			modify: func(p *TransportParameters) {},
 			reject: false,
+		},
+		{
+			name:   "ResetStreamAt disabled",
+			modify: func(p *TransportParameters) { p.EnableResetStreamAt = false },
+			reject: true,
 		},
 		{
 			name: "InitialMaxStreamDataBidiLocal reduced",
@@ -870,6 +949,12 @@ func TestTransportParametersValidAfter0RTT(t *testing.T) {
 			}
 		})
 	}
+	t.Run("ResetStreamAt enabled", func(t *testing.T) {
+		p := *saved
+		withoutResetStreamAt := *saved
+		withoutResetStreamAt.EnableResetStreamAt = false
+		require.True(t, p.ValidForUpdate(&withoutResetStreamAt))
+	})
 }
 
 func BenchmarkTransportParameters(b *testing.B) {
@@ -931,6 +1016,157 @@ func benchmarkTransportParameters(b *testing.B, withPreferredAddress bool) {
 		}
 		if withPreferredAddress && *p.PreferredAddress != *params.PreferredAddress {
 			b.Fatalf("preferred address mismatch: %v vs %v", p.PreferredAddress, params.PreferredAddress)
+		}
+	}
+}
+
+func FuzzTransportParameters(f *testing.F) {
+	corpus := ossfuzzseeds.New(f)
+
+	savedParams := (&TransportParameters{
+		InitialMaxStreamDataBidiLocal:  1234,
+		InitialMaxStreamDataBidiRemote: 2345,
+		InitialMaxStreamDataUni:        3456,
+		InitialMaxData:                 4567,
+		MaxBidiStreamNum:               1337,
+		MaxUniStreamNum:                7331,
+		ActiveConnectionIDLimit:        7,
+		MaxDatagramFrameSize:           protocol.InvalidByteCount,
+	}).MarshalForSessionTicket(nil)
+	zeroRTTParams := (&TransportParameters{
+		StatelessResetToken:     &protocol.StatelessResetToken{},
+		ActiveConnectionIDLimit: 7,
+		MaxDatagramFrameSize:    1200,
+	}).Marshal(protocol.PerspectiveServer)
+
+	rcid := protocol.ParseConnectionID([]byte{0xde, 0xad, 0xc0, 0xde})
+	minAckDelay := 42 * time.Millisecond
+	for _, seed := range []struct {
+		Data      []byte
+		SavedData []byte
+	}{
+		{(&TransportParameters{
+			StatelessResetToken:     &protocol.StatelessResetToken{},
+			ActiveConnectionIDLimit: 2,
+		}).Marshal(protocol.PerspectiveServer), savedParams},
+		{zeroRTTParams, savedParams},
+		{(&TransportParameters{
+			ActiveConnectionIDLimit: 2,
+			RetrySourceConnectionID: &rcid,
+		}).Marshal(protocol.PerspectiveClient), savedParams},
+		{(&TransportParameters{
+			EnableResetStreamAt:     true,
+			RetrySourceConnectionID: &rcid,
+			MinAckDelay:             &minAckDelay,
+		}).Marshal(protocol.PerspectiveClient), savedParams},
+		// session ticket
+		{savedParams, savedParams},
+		// with preferred address
+		{(&TransportParameters{
+			StatelessResetToken:     &protocol.StatelessResetToken{},
+			ActiveConnectionIDLimit: 2,
+			PreferredAddress: &PreferredAddress{
+				IPv4:                netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 42),
+				IPv6:                netip.AddrPortFrom(netip.AddrFrom16([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}), 13),
+				ConnectionID:        protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef}),
+				StatelessResetToken: protocol.StatelessResetToken{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1},
+			},
+		}).Marshal(protocol.PerspectiveServer), savedParams},
+	} {
+		corpus.Add(seed.Data, seed.SavedData)
+	}
+
+	f.Fuzz(func(t *testing.T, data, savedData []byte) {
+		fuzzTransportParameters(t, data, protocol.PerspectiveClient)
+		fuzzTransportParameters(t, data, protocol.PerspectiveServer)
+		fuzzTransportParametersSessionTicket(t, data)
+		fuzzTransportParameters0RTT(t, data, savedData)
+	})
+}
+
+func fuzzTransportParameters(t *testing.T, data []byte, sentBy protocol.Perspective) {
+	t.Helper()
+
+	tp := &TransportParameters{}
+	if err := tp.Unmarshal(data, sentBy); err != nil {
+		return
+	}
+	_ = tp.String()
+	checkTransportParameterInvariants(t, tp, sentBy)
+
+	tp2 := &TransportParameters{}
+	if err := tp2.Unmarshal(tp.Marshal(sentBy), sentBy); err != nil {
+		t.Fatalf("error unmarshaling re-marshaled transport parameters: %s", err)
+	}
+	checkTransportParameterInvariants(t, tp2, sentBy)
+}
+
+func fuzzTransportParametersSessionTicket(t *testing.T, data []byte) {
+	t.Helper()
+
+	tp := &TransportParameters{}
+	if err := tp.UnmarshalFromSessionTicket(data); err != nil {
+		return
+	}
+	_ = tp.String()
+	b := tp.MarshalForSessionTicket(nil)
+	tp2 := &TransportParameters{}
+	if err := tp2.UnmarshalFromSessionTicket(b); err != nil {
+		t.Fatalf("error unmarshaling re-marshaled session ticket transport parameters: %s", err)
+	}
+}
+
+func fuzzTransportParameters0RTT(t *testing.T, data, savedData []byte) {
+	t.Helper()
+
+	tp := &TransportParameters{}
+	if err := tp.Unmarshal(data, protocol.PerspectiveServer); err != nil {
+		return
+	}
+	saved := &TransportParameters{}
+	if err := saved.UnmarshalFromSessionTicket(savedData); err != nil {
+		return
+	}
+	_ = tp.ValidFor0RTT(saved)
+	_ = tp.ValidForUpdate(saved)
+}
+
+func checkTransportParameterInvariants(t *testing.T, tp *TransportParameters, sentBy protocol.Perspective) {
+	t.Helper()
+
+	if sentBy == protocol.PerspectiveClient && tp.StatelessResetToken != nil {
+		t.Fatal("client's transport parameters contained stateless reset token")
+	}
+	if tp.MaxIdleTimeout < 0 {
+		t.Fatalf("negative max_idle_timeout: %s", tp.MaxIdleTimeout)
+	}
+	if tp.AckDelayExponent > 20 {
+		t.Fatalf("invalid ack_delay_exponent: %d", tp.AckDelayExponent)
+	}
+	if tp.MaxUDPPayloadSize < 1200 {
+		t.Fatalf("invalid max_udp_payload_size: %d", tp.MaxUDPPayloadSize)
+	}
+	if tp.ActiveConnectionIDLimit < 2 {
+		t.Fatalf("invalid active_connection_id_limit: %d", tp.ActiveConnectionIDLimit)
+	}
+	if tp.OriginalDestinationConnectionID.Len() > 20 {
+		t.Fatalf("invalid original_destination_connection_id length: %s", tp.OriginalDestinationConnectionID)
+	}
+	if tp.InitialSourceConnectionID.Len() > 20 {
+		t.Fatalf("invalid initial_source_connection_id length: %s", tp.InitialSourceConnectionID)
+	}
+	if tp.RetrySourceConnectionID != nil && tp.RetrySourceConnectionID.Len() > 20 {
+		t.Fatalf("invalid retry_source_connection_id length: %s", tp.RetrySourceConnectionID)
+	}
+	if tp.PreferredAddress != nil && tp.PreferredAddress.ConnectionID.Len() > 20 {
+		t.Fatalf("invalid preferred_address connection ID length: %s", tp.PreferredAddress.ConnectionID)
+	}
+	if tp.MinAckDelay != nil {
+		if *tp.MinAckDelay < 0 {
+			t.Fatalf("negative min_ack_delay: %s", *tp.MinAckDelay)
+		}
+		if *tp.MinAckDelay > tp.MaxAckDelay {
+			t.Fatalf("min_ack_delay (%s) is greater than max_ack_delay (%s)", *tp.MinAckDelay, tp.MaxAckDelay)
 		}
 	}
 }

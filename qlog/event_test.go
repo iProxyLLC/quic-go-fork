@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/netip"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/qerr"
-	"github.com/quic-go/quic-go/internal/synctest"
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/wire"
 	"github.com/quic-go/quic-go/qlogwriter"
@@ -101,6 +101,20 @@ func TestVersionInformationWithNegotiation(t *testing.T) {
 	require.Equal(t, "1337", ev["chosen_version"])
 	require.Equal(t, []any{"1", "2", "3"}, ev["client_versions"])
 	require.Equal(t, []any{"4", "5", "6"}, ev["server_versions"])
+}
+
+func TestStreamPriorityUpdated(t *testing.T) {
+	name, ev := testEventEncoding(t, &StreamPriorityUpdated{
+		StreamID:    42,
+		Urgency:     2,
+		Incremental: true,
+	})
+
+	require.Equal(t, "transport:priority_updated", name)
+	require.Equal(t, map[string]any{
+		"stream_id": float64(42),
+		"new":       "u=2, i",
+	}, ev)
 }
 
 func TestIdleTimeouts(t *testing.T) {
@@ -399,7 +413,7 @@ func TestPacketSent(t *testing.T) {
 	require.Equal(t, "transport:packet_sent", name)
 	require.Contains(t, ev, "raw")
 	raw := ev["raw"].(map[string]any)
-	require.NotContains(t, ev, "datagram_id")
+	require.NotContains(t, ev, "datagram_payload_checksum")
 	require.Equal(t, float64(987), raw["length"])
 	require.Equal(t, float64(1337), raw["payload_length"])
 	require.Contains(t, ev, "header")
@@ -416,16 +430,16 @@ func TestPacketSent(t *testing.T) {
 }
 
 func TestPacketSent1RTT(t *testing.T) {
-	t.Run("with datagram ID", func(t *testing.T) {
+	t.Run("with datagram payload checksum", func(t *testing.T) {
 		testPacketSent1RTT(t, 1337)
 	})
 
-	t.Run("without datagram ID", func(t *testing.T) {
+	t.Run("without datagram payload checksum", func(t *testing.T) {
 		testPacketSent1RTT(t, 0)
 	})
 }
 
-func testPacketSent1RTT(t *testing.T, datagramID DatagramID) {
+func testPacketSent1RTT(t *testing.T, datagramPayloadChecksum DatagramPayloadChecksum) {
 	name, ev := testEventEncoding(t, &PacketSent{
 		Header: PacketHeader{
 			PacketType:       PacketType1RTT,
@@ -438,8 +452,8 @@ func testPacketSent1RTT(t *testing.T, datagramID DatagramID) {
 			{Frame: &AckFrame{AckRanges: []wire.AckRange{{Smallest: 1, Largest: 10}}}},
 			{Frame: &MaxDataFrame{MaximumData: 987}},
 		},
-		ECN:        ECNUnsupported,
-		DatagramID: datagramID,
+		ECN:                     ECNUnsupported,
+		DatagramPayloadChecksum: datagramPayloadChecksum,
 	})
 
 	require.Equal(t, "transport:packet_sent", name)
@@ -456,11 +470,11 @@ func testPacketSent1RTT(t *testing.T, datagramID DatagramID) {
 	require.Len(t, frames, 2)
 	require.Equal(t, "ack", frames[0].(map[string]any)["frame_type"])
 	require.Equal(t, "max_data", frames[1].(map[string]any)["frame_type"])
-	if datagramID != 0 {
-		require.Contains(t, ev, "datagram_id")
-		require.Equal(t, float64(datagramID), ev["datagram_id"])
+	if datagramPayloadChecksum != 0 {
+		require.Contains(t, ev, "datagram_payload_checksum")
+		require.Equal(t, float64(datagramPayloadChecksum), ev["datagram_payload_checksum"])
 	} else {
-		require.NotContains(t, ev, "datagram_id")
+		require.NotContains(t, ev, "datagram_payload_checksum")
 	}
 }
 
@@ -482,8 +496,8 @@ func TestPacketReceived(t *testing.T) {
 			{Frame: &MaxStreamDataFrame{StreamID: 42, MaximumStreamData: 987}},
 			{Frame: &StreamFrame{StreamID: 123, Offset: 1234, Length: 6, Fin: true}},
 		},
-		ECN:        ECT0,
-		DatagramID: 42,
+		ECN:                     ECT0,
+		DatagramPayloadChecksum: 42,
 	})
 
 	require.Equal(t, "transport:packet_received", name)
@@ -502,21 +516,21 @@ func TestPacketReceived(t *testing.T) {
 	require.Equal(t, "deadbeef", token["data"])
 	require.Contains(t, ev, "frames")
 	require.Len(t, ev["frames"].([]any), 2)
-	require.Contains(t, ev, "datagram_id")
-	require.Equal(t, float64(42), ev["datagram_id"])
+	require.Contains(t, ev, "datagram_payload_checksum")
+	require.Equal(t, float64(42), ev["datagram_payload_checksum"])
 }
 
 func TestPacketReceived1RTT(t *testing.T) {
-	t.Run("with datagram ID", func(t *testing.T) {
+	t.Run("with datagram payload checksum", func(t *testing.T) {
 		testPacketReceived1RTT(t, 1337)
 	})
 
-	t.Run("without datagram ID", func(t *testing.T) {
+	t.Run("without datagram payload checksum", func(t *testing.T) {
 		testPacketReceived1RTT(t, 0)
 	})
 }
 
-func testPacketReceived1RTT(t *testing.T, datagramID DatagramID) {
+func testPacketReceived1RTT(t *testing.T, datagramPayloadChecksum DatagramPayloadChecksum) {
 	name, ev := testEventEncoding(t, &PacketReceived{
 		Header: PacketHeader{
 			PacketType:       PacketType1RTT,
@@ -529,8 +543,8 @@ func testPacketReceived1RTT(t *testing.T, datagramID DatagramID) {
 			{Frame: &MaxStreamDataFrame{StreamID: 42, MaximumStreamData: 987}},
 			{Frame: &StreamFrame{StreamID: 123, Offset: 1234, Length: 6, Fin: true}},
 		},
-		ECN:        ECT1,
-		DatagramID: datagramID,
+		ECN:                     ECT1,
+		DatagramPayloadChecksum: datagramPayloadChecksum,
 	})
 
 	require.Equal(t, "transport:packet_received", name)
@@ -545,11 +559,11 @@ func testPacketReceived1RTT(t *testing.T, datagramID DatagramID) {
 	require.Equal(t, float64(1337), hdr["packet_number"])
 	require.Contains(t, ev, "frames")
 	require.Len(t, ev["frames"].([]any), 2)
-	if datagramID != 0 {
-		require.Contains(t, ev, "datagram_id")
-		require.Equal(t, float64(datagramID), ev["datagram_id"])
+	if datagramPayloadChecksum != 0 {
+		require.Contains(t, ev, "datagram_payload_checksum")
+		require.Equal(t, float64(datagramPayloadChecksum), ev["datagram_payload_checksum"])
 	} else {
-		require.NotContains(t, ev, "datagram_id")
+		require.NotContains(t, ev, "datagram_payload_checksum")
 	}
 }
 
@@ -613,27 +627,31 @@ func TestPacketBuffered(t *testing.T) {
 			DestConnectionID: protocol.ParseConnectionID([]byte{1, 2, 3, 4, 5, 6, 7, 8}),
 			SrcConnectionID:  protocol.ParseConnectionID([]byte{4, 3, 2, 1}),
 		},
-		Raw: RawInfo{Length: 1337},
+		Raw:                     RawInfo{Length: 1337},
+		DatagramPayloadChecksum: 42,
 	})
 
 	require.Equal(t, "transport:packet_buffered", name)
 	require.Contains(t, ev, "header")
 	require.Contains(t, ev, "raw")
 	require.Equal(t, float64(1337), ev["raw"].(map[string]any)["length"])
+	require.Equal(t, float64(42), ev["datagram_payload_checksum"])
 	require.Contains(t, ev, "trigger")
 	require.Equal(t, "keys_unavailable", ev["trigger"])
 }
 
 func TestPacketDropped(t *testing.T) {
 	name, ev := testEventEncoding(t, &PacketDropped{
-		Header:  PacketHeader{PacketType: PacketTypeRetry},
-		Raw:     RawInfo{Length: 1337},
-		Trigger: PacketDropPayloadDecryptError,
+		Header:                  PacketHeader{PacketType: PacketTypeRetry},
+		Raw:                     RawInfo{Length: 1337},
+		DatagramPayloadChecksum: 42,
+		Trigger:                 PacketDropPayloadDecryptError,
 	})
 
 	require.Equal(t, "transport:packet_dropped", name)
 	require.Contains(t, ev, "raw")
 	require.Equal(t, float64(1337), ev["raw"].(map[string]any)["length"])
+	require.Equal(t, float64(42), ev["datagram_payload_checksum"])
 	require.Contains(t, ev, "header")
 	require.Equal(t, "payload_decrypt_error", ev["trigger"])
 }

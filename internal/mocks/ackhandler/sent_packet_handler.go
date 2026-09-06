@@ -455,6 +455,42 @@ func (c *MockSentPacketHandlerReceivedPacketCall) DoAndReturn(f func(protocol.En
 	return c
 }
 
+// ReduceBytesInFlight mocks base method.
+func (m *MockSentPacketHandler) ReduceBytesInFlight(size protocol.ByteCount) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ReduceBytesInFlight", size)
+}
+
+// ReduceBytesInFlight indicates an expected call of ReduceBytesInFlight.
+func (mr *MockSentPacketHandlerMockRecorder) ReduceBytesInFlight(size any) *MockSentPacketHandlerReduceBytesInFlightCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReduceBytesInFlight", reflect.TypeOf((*MockSentPacketHandler)(nil).ReduceBytesInFlight), size)
+	return &MockSentPacketHandlerReduceBytesInFlightCall{Call: call}
+}
+
+// MockSentPacketHandlerReduceBytesInFlightCall wrap *gomock.Call
+type MockSentPacketHandlerReduceBytesInFlightCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerReduceBytesInFlightCall) Return() *MockSentPacketHandlerReduceBytesInFlightCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerReduceBytesInFlightCall) Do(f func(protocol.ByteCount)) *MockSentPacketHandlerReduceBytesInFlightCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerReduceBytesInFlightCall) DoAndReturn(f func(protocol.ByteCount)) *MockSentPacketHandlerReduceBytesInFlightCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ResetForRetry mocks base method.
 func (m *MockSentPacketHandler) ResetForRetry(rcvTime monotime.Time) {
 	m.ctrl.T.Helper()

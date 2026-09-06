@@ -80,10 +80,6 @@ func TestGoAwayFrame(t *testing.T) {
 	})
 }
 
-func pointer[T any](v T) *T {
-	return &v
-}
-
 func TestSettingsFrame(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -94,7 +90,7 @@ func TestSettingsFrame(t *testing.T) {
 			name: "datagram: true",
 			frame: SettingsFrame{
 				MaxFieldSectionSize: -1,
-				Datagram:            pointer(true),
+				Datagram:            new(true),
 			},
 			expected: map[string]any{
 				"frame_type": "settings",
@@ -108,7 +104,7 @@ func TestSettingsFrame(t *testing.T) {
 			name: "extended_connect: false",
 			frame: SettingsFrame{
 				MaxFieldSectionSize: -1,
-				ExtendedConnect:     pointer(false),
+				ExtendedConnect:     new(false),
 			},
 			expected: map[string]any{
 				"frame_type": "settings",
@@ -133,8 +129,8 @@ func TestSettingsFrame(t *testing.T) {
 			name: "datagram: false, extended_connect: false",
 			frame: SettingsFrame{
 				MaxFieldSectionSize: -1,
-				Datagram:            pointer(false),
-				ExtendedConnect:     pointer(false),
+				Datagram:            new(false),
+				ExtendedConnect:     new(false),
 			},
 			expected: map[string]any{
 				"frame_type": "settings",
@@ -186,6 +182,14 @@ func TestCancelPushFrame(t *testing.T) {
 func TestMaxPushIDFrame(t *testing.T) {
 	check(t, MaxPushIDFrame{}, map[string]any{
 		"frame_type": "max_push_id",
+	})
+}
+
+func TestPriorityUpdateFrame(t *testing.T) {
+	check(t, PriorityUpdateFrame{StreamID: 12, PriorityFieldValue: "u=1, i"}, map[string]any{
+		"frame_type":           "priority_update",
+		"stream_id":            12,
+		"priority_field_value": "u=1, i",
 	})
 }
 

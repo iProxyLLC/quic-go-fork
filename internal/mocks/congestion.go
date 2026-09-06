@@ -411,6 +411,42 @@ func (c *MockSendAlgorithmWithDebugInfosOnRetransmissionTimeoutCall) DoAndReturn
 	return c
 }
 
+// ResetForStall mocks base method.
+func (m *MockSendAlgorithmWithDebugInfos) ResetForStall() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ResetForStall")
+}
+
+// ResetForStall indicates an expected call of ResetForStall.
+func (mr *MockSendAlgorithmWithDebugInfosMockRecorder) ResetForStall() *MockSendAlgorithmWithDebugInfosResetForStallCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResetForStall", reflect.TypeOf((*MockSendAlgorithmWithDebugInfos)(nil).ResetForStall))
+	return &MockSendAlgorithmWithDebugInfosResetForStallCall{Call: call}
+}
+
+// MockSendAlgorithmWithDebugInfosResetForStallCall wrap *gomock.Call
+type MockSendAlgorithmWithDebugInfosResetForStallCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSendAlgorithmWithDebugInfosResetForStallCall) Return() *MockSendAlgorithmWithDebugInfosResetForStallCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSendAlgorithmWithDebugInfosResetForStallCall) Do(f func()) *MockSendAlgorithmWithDebugInfosResetForStallCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSendAlgorithmWithDebugInfosResetForStallCall) DoAndReturn(f func()) *MockSendAlgorithmWithDebugInfosResetForStallCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetMaxDatagramSize mocks base method.
 func (m *MockSendAlgorithmWithDebugInfos) SetMaxDatagramSize(arg0 protocol.ByteCount) {
 	m.ctrl.T.Helper()

@@ -60,7 +60,7 @@ func testClientSettings(t *testing.T, enableDatagrams bool, other map[uint64]uin
 
 	var datagramValue *bool
 	if enableDatagrams {
-		datagramValue = pointer(true)
+		datagramValue = new(true)
 	}
 	require.Equal(t,
 		[]qlogwriter.Event{
@@ -463,13 +463,20 @@ func TestClientGzip(t *testing.T) {
 	gzippedFoobar := buf.Bytes()
 
 	t.Run("gzipped", func(t *testing.T) {
-		testClientGzip(t, gzippedFoobar, []byte("foobar"), false, true)
+		testClientGzip(t, gzippedFoobar, []byte("foobar"), false, true, http.MethodGet, http.StatusOK)
 	})
 	t.Run("not gzipped", func(t *testing.T) {
-		testClientGzip(t, []byte("foobar"), []byte("foobar"), false, false)
+		testClientGzip(t, []byte("foobar"), []byte("foobar"), false, false, http.MethodGet, http.StatusOK)
 	})
 	t.Run("disable compression", func(t *testing.T) {
-		testClientGzip(t, gzippedFoobar, gzippedFoobar, true, true)
+		testClientGzip(t, gzippedFoobar, gzippedFoobar, true, true, http.MethodGet, http.StatusOK)
+	})
+	t.Run("successful CONNECT", func(t *testing.T) {
+		rsp := testClientGzip(t, gzippedFoobar, gzippedFoobar, false, true, http.MethodConnect, http.StatusOK)
+		require.Equal(t, "gzip", rsp.Header.Get("Content-Encoding"))
+	})
+	t.Run("failed CONNECT", func(t *testing.T) {
+		testClientGzip(t, gzippedFoobar, []byte("foobar"), false, true, http.MethodConnect, http.StatusBadRequest)
 	})
 }
 
@@ -478,13 +485,15 @@ func testClientGzip(t *testing.T,
 	expectedRsp []byte,
 	transportDisableCompression bool,
 	responseAddContentEncoding bool,
-) {
+	method string,
+	status int,
+) *http.Response {
 	var rspBuf bytes.Buffer
 	rstr := NewMockDatagramStream(gomock.NewController(t))
 	rstr.EXPECT().StreamID().Return(quic.StreamID(42)).AnyTimes()
 	rstr.EXPECT().Write(gomock.Any()).Do(rspBuf.Write).AnyTimes()
 	rw := newResponseWriter(newStream(rstr, nil, nil, func(io.Reader, *headersFrame) error { return nil }, nil), nil, false, nil)
-	rw.WriteHeader(http.StatusOK)
+	rw.WriteHeader(status)
 	if responseAddContentEncoding {
 		rw.header.Add("Content-Encoding", "gzip")
 	}
@@ -500,7 +509,7 @@ func testClientGzip(t *testing.T,
 	resultChan := make(chan result)
 	go func() {
 		cc := (&Transport{DisableCompression: transportDisableCompression}).NewClientConn(clientConn)
-		rsp, err := cc.RoundTrip(httptest.NewRequest(http.MethodGet, "http://quic-go.net", nil))
+		rsp, err := cc.RoundTrip(httptest.NewRequest(method, "http://quic-go.net", nil))
 		resultChan <- result{rsp: rsp, err: err}
 	}()
 
@@ -531,10 +540,11 @@ func testClientGzip(t *testing.T,
 		t.Fatal("timeout")
 	}
 
-	require.Equal(t, http.StatusOK, rsp.StatusCode)
+	require.Equal(t, status, rsp.StatusCode)
 	body, err := io.ReadAll(rsp.Body)
 	require.NoError(t, err)
 	require.Equal(t, expectedRsp, body)
+	return rsp
 }
 
 func TestClientRequestCancellation(t *testing.T) {
@@ -615,16 +625,7 @@ func testClientConnGoAway(t *testing.T, withStream bool) {
 		case <-time.After(scaleDuration(10 * time.Millisecond)):
 		}
 
-		// the stream ID in the GOAWAY frame is 8, so it's possible to open stream 4
-		str2, err := cc.OpenRequestStream(context.Background())
-		require.NoError(t, err)
-		str2.Close()
-		str2.CancelRead(1337)
-
-		// it's not possible to open stream 8
-		_, err = cc.OpenRequestStream(context.Background())
-		require.ErrorIs(t, err, errGoAway)
-
+		// GOAWAY allows the request that was already open to finish.
 		str.Close()
 		str.CancelRead(1337)
 	}
@@ -652,8 +653,8 @@ func testClientConnGoAway(t *testing.T, withStream bool) {
 	)
 }
 
-func TestClientConnGoConcurrent(t *testing.T) {
-	clientConn, serverConn := newConnPair(t, withServerBidiStreamLimit(1)) // allows streams 0
+func TestClientConnGoAwayConcurrent(t *testing.T) {
+	clientConn, serverConn := newConnPair(t, withServerBidiStreamLimit(2)) // allows streams 0 and 4
 
 	cc := (&Transport{}).NewClientConn(clientConn)
 
@@ -671,8 +672,24 @@ func TestClientConnGoConcurrent(t *testing.T) {
 	case <-time.After(scaleDuration(10 * time.Millisecond)):
 	}
 
-	// of these 2 OpenStreamSync calls, one will succeed, the other one will block
-	errChan := make(chan error, 3)
+	// Consume both streams the server allows, but keep their receive sides open.
+	for range 2 {
+		str, err := cc.OpenRequestStream(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, str.Close())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	sstr0, err := serverConn.AcceptStream(ctx)
+	require.NoError(t, err)
+	require.Equal(t, quic.StreamID(0), sstr0.StreamID())
+	sstr4, err := serverConn.AcceptStream(ctx)
+	require.NoError(t, err)
+	require.Equal(t, quic.StreamID(4), sstr4.StreamID())
+
+	// Both of these calls will block in OpenStreamSync.
+	errChan := make(chan error, 2)
 	for range 2 {
 		go func() {
 			str, err := cc.OpenRequestStream(context.Background())
@@ -683,48 +700,51 @@ func TestClientConnGoConcurrent(t *testing.T) {
 		}()
 	}
 
-	// wait until all Goroutines have started
-	time.Sleep(scaleDuration(10 * time.Millisecond))
-
-	select {
-	case err := <-errChan:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
-	// the second stream is still blocked
 	select {
 	case <-errChan:
-		t.Fatal("second OpenStreamSync should have blocked")
+		t.Fatal("OpenStreamSync calls should have blocked")
 	case <-time.After(scaleDuration(10 * time.Millisecond)):
 	}
 
-	// send the GOAWAY frame
-	b = (&goAwayFrame{StreamID: 4}).Append(nil)
+	// Send a GOAWAY with a stream ID higher than the next stream ID.
+	b = (&goAwayFrame{StreamID: 12}).Append(nil)
 	_, err = controlStr.Write(b)
 	require.NoError(t, err)
 
-	// accepting and closing the stream allows the client to open another stream
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	sstr, err := serverConn.AcceptStream(ctx)
-	require.NoError(t, err)
-	sstr.Close()
-	sstr.CancelRead(1337)
-
-	// The second stream is opened by the client,
-	// and immediately closed with a H3_REQUEST_CANCELED error.
-	select {
-	case err := <-errChan:
-		require.ErrorIs(t, err, errGoAway)
-	case <-time.After(scaleDuration(10 * time.Millisecond)):
-		t.Fatal("timeout")
+	// The GOAWAY stream ID only applies to requests already in flight. Even though
+	// stream 8 would be below the limit, no new request stream may be opened.
+	for range 2 {
+		select {
+		case err := <-errChan:
+			require.ErrorIs(t, err, errGoAway)
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
 	}
 
-	sstr, err = serverConn.AcceptStream(ctx)
-	require.NoError(t, err)
-	_, err = sstr.Read([]byte{0})
-	require.ErrorIs(t, err, &quic.StreamError{StreamID: 4, ErrorCode: quic.StreamErrorCode(ErrCodeRequestCanceled), Remote: true})
+	// The streams opened before GOAWAY are not canceled.
+	buf := make([]byte, 1)
+	_, err = sstr0.Read(buf)
+	require.ErrorIs(t, err, io.EOF)
+	_, err = sstr4.Read(buf)
+	require.ErrorIs(t, err, io.EOF)
+
+	// Complete stream 0 to free stream credit, while stream 4 keeps the connection alive.
+	require.NoError(t, sstr0.Close())
+
+	// Calls made after receiving GOAWAY fail even when stream credit is available.
+	openCtx, openCancel := context.WithTimeout(context.Background(), time.Second)
+	defer openCancel()
+	_, err = cc.OpenRequestStream(openCtx)
+	require.ErrorIs(t, err, errGoAway)
+
+	// In particular, the client didn't open and cancel stream 8 behind the caller's back.
+	noStreamCtx, noStreamCancel := context.WithTimeout(context.Background(), scaleDuration(10*time.Millisecond))
+	defer noStreamCancel()
+	_, err = serverConn.AcceptStream(noStreamCtx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	require.NoError(t, sstr4.Close())
 }
 
 func TestClientConnGoAwayFailures(t *testing.T) {
